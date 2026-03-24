@@ -116,5 +116,86 @@ vars2 <- c("race", "menopause", "chemo", "hormonal_therapy", "surgery")
 plot_categorical(dfA, vars1, "Distribution of Categorical Variables")
 plot_categorical(dfA, vars2, "Distribution of Categorical Variables Cont.")
 ```
+# Relationship with response variable
+```{r}
+# Cateforical
+dfA |>
+  select(log_PFS, stage, tumor_grade, ER, PR, HER2,
+         chemo, hormonal_therapy, surgery, menopause) |>
+  mutate(across(-log_PFS, as.character)) |>
+  pivot_longer(cols = -log_PFS) |>
+  ggplot(aes(x = value, y = log_PFS)) +
+  
+  geom_boxplot(fill = "lightblue") +
+  
+  facet_wrap(~name, scales = "free_x", ncol = 5) +
+  
+  theme_minimal() +
+  labs(
+    x = "Category",
+    y = "log_PFS",
+    title = "Association Between Categorical Variables and log_PFS"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    strip.text = element_text(size = 10)
+  )
 
+# Continuous
+dfA |>
+  select(log_PFS, age, bmi, tumor_size, lymph_nodes, Ki67) |>
+  pivot_longer(cols = -log_PFS) |>
+  ggplot(aes(x = value, y = log_PFS)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  facet_wrap(~name, scales = "free_x") +
+  theme_minimal() +
+  labs(
+    x = "Value",
+    y = "log_PFS",
+    title = "Association Between Continuous Variables and log_PFS"
+  )
+```
+# Correlation Check (Continuous)
+```{r}
+cont_vars <- dfA |>
+  select(age, bmi, tumor_size, lymph_nodes, Ki67, log_PFS)
+
+cor(cont_vars, use = "complete.obs")
+```
+
+# Handle Skewness
+```{r}
+# Log transform lymph_nodes
+dfA <- dfA |>
+  mutate(
+    lymph_nodes_log = log(lymph_nodes + 1)
+  )
+dfA |>
+  select(lymph_nodes, lymph_nodes_log) |>
+  pivot_longer(cols = everything()) |>
+  ggplot(aes(x = value)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 binwidth = 0.2,
+                 fill = "steelblue",
+                 color = "black") +
+  geom_density(color = "red", linewidth = 1) +
+  facet_wrap(~name, scales = "free") +
+  theme_minimal() +
+  labs(title = "Before vs After Log Transformation")
+```
+
+# Train Test Split
+```{r}
+set.seed(1)
+
+train_index <- createDataPartition(dfA$log_PFS, p = 0.7, list = FALSE)
+train_data <- dfA[train_index, ]
+test_data  <- dfA[-train_index, ]
+```
+
+# SAVE
+```{r}
+save(train_data, test_data, file = "clean_datA.RData")
+```
 
