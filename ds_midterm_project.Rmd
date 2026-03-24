@@ -1,0 +1,6 @@
+---
+title: "ds_midterm_project"
+author: "Charlotte Zhang"
+date: "2026-03-24"
+output: pdf_document
+---
