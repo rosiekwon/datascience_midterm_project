@@ -57,3 +57,94 @@ rmse3
 rmse4
 ```
 # Based on the test error result, we should choose the model with all significant variables and tumor grade as the best prediction model for log_PFS
+
+```{r GAM}
+library(mgcv)
+
+fit_gam <- gam(log_PFS ~ s(age) + s(tumor_size) + s(lymph_nodes) + s(Ki67) +
+                 ER + HER2 + hormonal_therapy + tumor_grade, data = train)
+
+summary(fit_gam)
+
+pred_gam <- predict(fit_gam, newdata = test)
+
+rmse_gam <- sqrt(mean((test$log_PFS - pred_gam)^2))
+rmse_gam
+```
+# GAM gave only negligible improvement in RMSE, and most smooth terms were approximately linear, with only mild evidence of nonlinearity for tumor size.
+
+```{r MARS, warning = FALSE, message = FALSE}
+library(earth)
+
+fit_mars <- earth(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy
+                  + tumor_grade + Ki67, data = train)
+
+summary(fit_mars)
+pred_mars <- predict(fit_mars, newdata = test)
+rmse_mars <- sqrt(mean((test$log_PFS - pred_mars)^2))
+rmse_mars
+```
+# Based on the RMSE and interpretability, lm is also a better model than MARS.
+
+```{r ridge_regression}
+library(glmnet)
+set.seed(2)
+
+x_train <- model.matrix(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 +
+                          hormonal_therapy + tumor_grade + Ki67, data = train)[, -1]
+y_train <- train$log_PFS
+
+x_test <- model.matrix(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy
+                       + tumor_grade + Ki67, data = test)[, -1]
+y_test <- test$log_PFS
+
+cv.ridge <- cv.glmnet(x_train, y_train, alpha = 0)
+cv.ridge$lambda.min
+
+pred_ridge <- predict(cv.ridge, newx = x_test, s = "lambda.min")
+rmse_ridge <- sqrt(mean((y_test - pred_ridge)^2))
+rmse_ridge
+
+coef(cv.ridge, s = "lambda.min")
+```
+# The ridge regression model has a RMSE of 0.6855426, which is a bit larger than multiple linear regression model.
+
+```{r lasso}
+cv.lasso <- cv.glmnet(x_train, y_train, alpha = 1)
+cv.lasso$lambda.min
+
+pred_lasso <- predict(cv.lasso, newx = x_test, s = "lambda.min")
+rmse_lasso <- sqrt(mean((y_test - pred_lasso)^2))
+rmse_lasso
+
+coef(cv.lasso, s = "lambda.min")
+```
+# The lasso model has a RMSE of 0.6855532, which is a bit larger than multiple linear regression model.
+
+```{r elastic_net, message = FALSE}
+library(caret)
+
+set.seed(2)
+
+ctrl1 <- trainControl(method = "cv", number = 10)
+
+enet.fit <- train(
+  log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy + tumor_grade + Ki67,
+  data = train,
+  method = "glmnet",
+  tuneGrid = expand.grid(
+    alpha = seq(0, 1, length = 21),
+    lambda = exp(seq(6, -4, length = 100))
+  ),
+  trControl = ctrl1
+)
+
+enet.fit$bestTune
+
+enet.pred <- predict(enet.fit, newdata = test)
+enet_test_rmse <- sqrt(mean((enet.pred - test$log_PFS)^2))
+enet_test_rmse
+
+coef(enet.fit$finalModel, enet.fit$bestTune$lambda)
+```
+# The elastic net model has a RMSE of 0.6855651 and lamda = 0, which means it is actually same as ridge regression and it is a bit larger than multiple linear regression model.
