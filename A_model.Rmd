@@ -9,3 +9,51 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{r model_A_prep}
+load("clean_datA.RData")
+train <- train_data
+test <- test_data
+```
+
+```{r multiple_linear_regression_variable}
+fit_lm <- lm(log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grade +
+               lymph_nodes + ER + PR + HER2 + Ki67 + stage + surgery +
+               chemo + hormonal_therapy, data = train)
+summary(fit_lm)
+```
+# From the summary, we get "age", "tumor_size", "lymph_nodes", "ERPositive", "HER2Positive", "hormonal_therapyYes" as significant variables, and "tumor_grade.L" with "Ki67" as marginally significant variables.
+```{r lm_model}
+#lm with only significant variables
+fit_lm_significant_1 <- lm(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy, data = train)
+#lm with significant variables + tumor_grade
+fit_lm_significant_2 <- lm(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy + tumor_grade, data = train)
+#lm with significant variables + Ki67
+fit_lm_significant_3 <- lm(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy + Ki67, data = train)
+#lm with significant variables + tumor_grade + Ki67
+fit_lm_significant_4 <- lm(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy + tumor_grade + Ki67, data = train)
+
+#observe the summary result
+summary(fit_lm_significant_1)
+summary(fit_lm_significant_2)
+summary(fit_lm_significant_3)
+summary(fit_lm_significant_4)
+
+#observe the RMSE to decide the final model
+pred1 <- predict(fit_lm_significant_1, newdata = test)
+pred2 <- predict(fit_lm_significant_2, newdata = test)
+pred3 <- predict(fit_lm_significant_3, newdata = test)
+pred4 <- predict(fit_lm_significant_4, newdata = test)
+
+
+rmse1 <- sqrt(mean((test$log_PFS - pred1)^2))
+rmse2 <- sqrt(mean((test$log_PFS - pred2)^2))
+rmse3 <- sqrt(mean((test$log_PFS - pred3)^2))
+rmse4 <- sqrt(mean((test$log_PFS - pred4)^2))
+
+
+rmse1
+rmse2
+rmse3
+rmse4
+```
+# Based on the test error result, we should choose the model with all significant variables and tumor grade as the best prediction model for log_PFS
