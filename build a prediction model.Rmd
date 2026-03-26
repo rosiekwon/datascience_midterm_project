@@ -1,11 +1,18 @@
 ---
-title: "TRY"
-author: "Rosie Kwon"
+title: "Group 22 Midterm Project"
 date: "2026-03-25"
-output: html_document
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+  html_document:
+    toc: true
+    toc_float: true
 ---
 
-```{r}
+\newpage
+
+```{r setup, message = FALSE, warning = FALSE}
 library(tidyverse)
 library(caret)
 library(glmnet)
@@ -14,6 +21,8 @@ library(earth)
 library(pls)
 library(patchwork)
 library(vip) 
+library(dplyr)
+library(tidyr)
 ```
 
 In order to reproduce the code we set the seed at 1
@@ -34,14 +43,15 @@ Include the `lymph_nodes_log` variable we created
 full_formula <- log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grade + lymph_nodes_log + ER + PR + HER2 + Ki67 + stage + surgery + chemo + hormonal_therapy
 ```
 
-# (1) Linear Regression (Baseline)
+# 1. Linear Regression (Baseline)
 ```{r}
 set.seed(1)
 fit_lm <- train(full_formula, data = train_data, method = "lm", trControl = ctrl)
 ```
 
-# (2) Ridge, Lasso, Elastic Net (Regularization)
-## (2-1) Ridge
+# 2. Ridge, Lasso, Elastic Net (Regularization)
+
+## 2-1. Ridge Regression
 ```{r}
 set.seed(1)
 fit_ridge <- train(full_formula, data = train_data, method = "glmnet",
@@ -55,7 +65,7 @@ fit_ridge$bestTune
 ```
 
 
-## (2-2) Lasso
+## 2-2. Lasso Regression
 ```{r}
 set.seed(1)
 fit_lasso <- train(full_formula, data = train_data, method = "glmnet",
@@ -70,7 +80,7 @@ fit_lasso$bestTune
 coef(fit_lasso$finalModel, fit_lasso$bestTune$lambda)
 ```
 
-## (2-3) Elastic net
+## 2-3. Elastic net Regression
 ```{r}
 set.seed(1)
 fit_enet <- train(full_formula, data = train_data, method = "glmnet",
@@ -85,36 +95,49 @@ plot(fit_enet, xTrans = log)
 coef(fit_enet$finalModel, fit_enet$bestTune$lambda)
 ```
 
-# (3) PCR & PLS (Dimension Reduction)
-## (3-1) PCR (Principal Component Regression)
+# 3. PCR & PLS (Dimension Reduction)
+## 3-1. PCR (Principal Component Regression)
 ```{r}
 set.seed(1)
+pcr_mod <- pcr(full_formula, data = train_data, scale = TRUE, validation = "CV")
+
+summary(pcr_mod)
+
+
 fit_pcr <- train(full_formula, data = train_data, method = "pcr", 
                  scale = TRUE, trControl = ctrl, tuneLength = 15)
 ```
 
 
-## (3-2) PLS (Partial Least Squares)
+## 3-2. PLS (Partial Least Squares)
 ```{r}
 set.seed(1)
 fit_pls <- train(full_formula, data = train_data, method = "pls", 
                  scale = TRUE, trControl = ctrl, tuneLength = 15)
 ```
 
-# (4) GAM & MARS (Nonlinear Methods)
-## (4-1) GAM
+# 4. GAM & MARS (Nonlinear Methods)
+
+## 4-1. GAM
+
 ```{r}
 set.seed(1)
 fit_gam <- train(full_formula, data = train_data, method = "gam", trControl = ctrl)
+
+summary(fit_gam)
+
+fit_gam$finalModel
 ```
 
-## (4-2) MARS
+## 4-2. MARS
 ```{r}
 set.seed(1)
 fit_mars <- train(full_formula, data = train_data, method = "earth", trControl = ctrl)
+
+plot(fit_mars)
 ```
 
-# Model comparison
+# Model comparison CV RMSE
 ```{r}
 res_comparison <- resamples(list(LM = fit_lm, Ridge = fit_ridge, Lasso = fit_lasso, ENet = fit_enet, PLS = fit_pls, PCR = fit_pcr, GAM = fit_gam, MARS = fit_mars))
 summary(res_comparison)
@@ -122,4 +145,28 @@ summary(res_comparison)
 bwplot(res_comparison, metric = "RMSE", main = "CV RMSE Comparison")
 ```
 
+
+# Test RMSE 
+```{r}
+model_list <- list(LM = fit_lm, Ridge = fit_ridge, Lasso = fit_lasso, 
+                   ENet = fit_enet, PLS = fit_pls, PCR = fit_pcr, 
+                   GAM = fit_gam, MARS = fit_mars)
+
+
+test_preds <- as.data.frame(lapply(model_list, predict, newdata = test_data))
+
+
+test_preds$log_PFS <- test_data$log_PFS
+
+
+test_results <- test_preds |> 
+  pivot_longer(cols = -log_PFS, names_to = "Model", values_to = "Predicted")  |> 
+  group_by(Model)  |> 
+  summarize(
+    Test_RMSE = sqrt(mean((log_PFS - Predicted)^2)),
+  )  |> 
+  arrange(Test_RMSE) 
+
+print(test_results)
+```
 
