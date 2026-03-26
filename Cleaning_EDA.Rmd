@@ -158,10 +158,23 @@ dfA |>
 ```
 # Correlation Check (Continuous)
 ```{r}
+library(corrplot)
+
 cont_vars <- dfA |>
   select(age, bmi, tumor_size, lymph_nodes, Ki67, log_PFS)
 
-cor(cont_vars, use = "complete.obs")
+cor_matrix <- cor(cont_vars, use = "complete.obs")
+
+corrplot(
+  cor_matrix,
+  method = "circle",         
+  type = "full",
+  tl.col = "red",            
+  tl.srt = 45,               
+  addCoef.col = "black",     
+  number.cex = 0.7,
+  mar = c(0,0,1,0)
+)
 ```
 
 # Handle Skewness
