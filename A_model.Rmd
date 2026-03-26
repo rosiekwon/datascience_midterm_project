@@ -13,32 +13,31 @@ knitr::opts_chunk$set(echo = TRUE)
 load("clean_datA.RData")
 train <- train_data
 test <- test_data
+full_formula <- log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grade + lymph_nodes_log + ER + PR + HER2 + Ki67 + stage + surgery + chemo + hormonal_therapy
 ```
 
 ```{r multiple_linear_regression_variable}
-fit_lm <- lm(log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grade +
-               lymph_nodes + ER + PR + HER2 + Ki67 + stage + surgery +
-               chemo + hormonal_therapy + lymph_nodes_log, data = train)
+fit_lm <- lm(full_formula, data = train)
 summary(fit_lm)
 ```
-# From the summary, we get "age", "tumor_size", "lymph_nodes", "ERPositive", "HER2Positive", "hormonal_therapyYes" as significant variables, and "tumor_grade.L" with "Ki67" as marginally significant variables.
+# From the summary, we get "age", "tumor_size", "lymph_nodes_log", "ERPositive", "HER2Positive", "hormonal_therapyYes" as significant variables, and "tumor_grade.L" with "Ki67" as marginally significant variables.
 ```{r lm_model}
-#lm with only significant variables
-fit_lm_significant_1 <- lm(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy, data = train)
-#lm with significant variables + tumor_grade
-fit_lm_significant_2 <- lm(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy + tumor_grade, data = train)
-#lm with significant variables + Ki67
-fit_lm_significant_3 <- lm(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy + Ki67, data = train)
-#lm with significant variables + tumor_grade + Ki67
-fit_lm_significant_4 <- lm(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy + tumor_grade + Ki67, data = train)
+# lm with only significant variables
+fit_lm_significant_1 <- lm(log_PFS ~ age + tumor_size + lymph_nodes_log + ER + HER2 + hormonal_therapy, data = train)
+# lm with significant variables + tumor_grade
+fit_lm_significant_2 <- lm(log_PFS ~ age + tumor_size + lymph_nodes_log + ER + HER2 + hormonal_therapy + tumor_grade, data = train)
+# lm with significant variables + Ki67
+fit_lm_significant_3 <- lm(log_PFS ~ age + tumor_size + lymph_nodes_log + ER + HER2 + hormonal_therapy + Ki67, data = train)
+# lm with significant variables + tumor_grade + Ki67
+fit_lm_significant_4 <- lm(log_PFS ~ age + tumor_size + lymph_nodes_log + ER + HER2 + hormonal_therapy + tumor_grade + Ki67, data = train)
 
-#observe the summary result
+# observe the summary result
 summary(fit_lm_significant_1)
 summary(fit_lm_significant_2)
 summary(fit_lm_significant_3)
 summary(fit_lm_significant_4)
 
-#observe the RMSE to decide the final model
+# observe the RMSE to decide the final model
 pred1 <- predict(fit_lm_significant_1, newdata = test)
 pred2 <- predict(fit_lm_significant_2, newdata = test)
 pred3 <- predict(fit_lm_significant_3, newdata = test)
@@ -61,7 +60,7 @@ rmse4
 ```{r GAM}
 library(mgcv)
 
-fit_gam <- gam(log_PFS ~ s(age) + s(tumor_size) + s(lymph_nodes) + s(Ki67) +
+fit_gam <- gam(log_PFS ~ s(age) + s(tumor_size) + s(lymph_nodes_log) + s(Ki67) +
                  ER + HER2 + hormonal_therapy + tumor_grade, data = train)
 
 summary(fit_gam)
@@ -76,7 +75,7 @@ rmse_gam
 ```{r MARS, warning = FALSE, message = FALSE}
 library(earth)
 
-fit_mars <- earth(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy
+fit_mars <- earth(log_PFS ~ age + tumor_size + lymph_nodes_log + ER + HER2 + hormonal_therapy
                   + tumor_grade + Ki67, data = train)
 
 summary(fit_mars)
@@ -86,41 +85,61 @@ rmse_mars
 ```
 # Based on the RMSE and interpretability, lm is also a better model than MARS.
 
-```{r ridge_regression}
+```{r linear_model_prep}
 library(glmnet)
-set.seed(1)
 
-x_train <- model.matrix(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 +
-                          hormonal_therapy + tumor_grade + Ki67, data = train)[, -1]
+x_train <- model.matrix(full_formula, data = train)[, -1]
 y_train <- train$log_PFS
 
-x_test <- model.matrix(log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy
-                       + tumor_grade + Ki67, data = test)[, -1]
+x_test <- model.matrix(full_formula, data = test)[, -1]
 y_test <- test$log_PFS
-
-cv.ridge <- cv.glmnet(x_train, y_train, alpha = 0)
-cv.ridge$lambda.min
-
-pred_ridge <- predict(cv.ridge, newx = x_test, s = "lambda.min")
-rmse_ridge <- sqrt(mean((y_test - pred_ridge)^2))
-rmse_ridge
-
-coef(cv.ridge, s = "lambda.min")
 ```
-# The ridge regression model has a RMSE of 0.6856145, which is a bit larger than multiple linear regression model.
+
+```{r ridge_regression}
+set.seed(1)
+cv.ridge <- cv.glmnet(x_train, y_train, alpha = 0)
+
+cv.ridge$lambda.min
+cv.ridge$lambda.1se
+
+# test RMSE using best
+pred_ridge_best <- predict(cv.ridge, newx = x_test, s = "lambda.min")
+rmse_ridge_best <- sqrt(mean((y_test - pred_ridge_best)^2))
+rmse_ridge_best
+
+# test RMSE using 1se
+pred_ridge_1se <- predict(cv.ridge, newx = x_test, s = "lambda.1se")
+rmse_ridge_1se <- sqrt(mean((y_test - pred_ridge_1se)^2))
+rmse_ridge_1se
+
+# get the coefficients to see which ones are non-zero
+coef(cv.ridge, s = "lambda.min")
+coef(cv.ridge, s = "lambda.1se")
+```
+# For ridge regression, we use the full formula and get the RMSE of 0.6886818 from best fitted model.
 
 ```{r lasso}
 set.seed(1)
 cv.lasso <- cv.glmnet(x_train, y_train, alpha = 1)
+
 cv.lasso$lambda.min
+cv.lasso$lambda.1se
 
-pred_lasso <- predict(cv.lasso, newx = x_test, s = "lambda.min")
-rmse_lasso <- sqrt(mean((y_test - pred_lasso)^2))
-rmse_lasso
+# test RMSE using best
+pred_lasso_best <- predict(cv.lasso, newx = x_test, s = "lambda.min")
+rmse_lasso_best <- sqrt(mean((y_test - pred_lasso_best)^2))
+rmse_lasso_best
 
+# test RMSE using 1se
+pred_lasso_1se <- predict(cv.lasso, newx = x_test, s = "lambda.1se")
+rmse_lasso_1se <- sqrt(mean((y_test - pred_lasso_1se)^2))
+rmse_lasso_1se
+
+# get the coefficients to see which ones are non-zero
 coef(cv.lasso, s = "lambda.min")
+coef(cv.lasso, s = "lambda.1se")
 ```
-# The lasso model has a RMSE of 0.6853668, which is slightly larger than multiple linear regression model.
+# For lasso regression, the best model had a test RMSE of 0.6869, while the 1SE model  had a higher RMSE of 0.6977. The 1SE model kept fewer predictors and was more parsimonious, but its predictive performance was worse. Therefore, the best lasso model performed better than the 1SE lasso model, although neither outperformed the multiple linear regression model.
 
 ```{r elastic_net, message = FALSE}
 library(caret)
@@ -129,23 +148,32 @@ set.seed(1)
 
 ctrl1 <- trainControl(method = "cv", number = 10)
 
-enet.fit <- train(
-  log_PFS ~ age + tumor_size + lymph_nodes + ER + HER2 + hormonal_therapy + tumor_grade + Ki67,
-  data = train,
-  method = "glmnet",
-  tuneGrid = expand.grid(
-    alpha = seq(0, 1, length = 21),
-    lambda = exp(seq(6, -4, length = 100))
-  ),
-  trControl = ctrl1
-)
-
+enet.fit <- train(full_formula, data = train, method = "glmnet", 
+                  tuneGrid = expand.grid(alpha = seq(0, 1, length = 21),
+                  lambda = 10^seq(-4, 1, length = 100)),
+                  trControl = ctrl1)
+# selected tuning parameter
 enet.fit$bestTune
 
-enet.pred <- predict(enet.fit, newdata = test)
-enet_test_rmse <- sqrt(mean((enet.pred - test$log_PFS)^2))
-enet_test_rmse
+# get alpha = 0.3
+set.seed(1)
+cv.enet <- cv.glmnet(x_train, y_train, alpha = 0.3)
 
-coef(enet.fit$finalModel, enet.fit$bestTune$lambda)
+cv.enet$lambda.min
+cv.enet$lambda.1se
+
+# test RMSE using best
+pred_enet_best <- predict(cv.enet, newx = x_test, s = "lambda.min")
+rmse_enet_best <- sqrt(mean((y_test - pred_enet_best)^2))
+rmse_enet_best
+
+# test RMSE using 1se
+pred_enet_1se <- predict(cv.enet, newx = x_test, s = "lambda.1se")
+rmse_enet_1se <- sqrt(mean((y_test - pred_enet_1se)^2))
+rmse_enet_1se
+
+# get the coefficients to see which ones are non-zero
+coef(cv.enet, s = "lambda.min")
+coef(cv.enet, s = "lambda.1se")
 ```
-# The elastic net model has a RMSE of 0.6856545 and lamda = 0, which means it is actually same as ridge regression and it is a bit larger than multiple linear regression model.
+# In elastic net regression, the best model had lower test RMSE than the 1SE model. Although the 1SE model was simpler, it predicted less accurately. Neither elastic net model performed better than the multiple linear regression model.
