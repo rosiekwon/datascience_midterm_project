@@ -1,0 +1,125 @@
+---
+title: "TRY"
+author: "Rosie Kwon"
+date: "2026-03-25"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(mgcv)
+library(earth)
+library(pls)
+library(patchwork)
+library(vip) 
+```
+
+In order to reproduce the code we set the seed at 1
+```{r}
+set.seed(1) 
+load("clean_datA.RData")
+train <- train_data
+test <- test_data
+```
+
+we performed 10-fold cross-validation exclusively within the training set
+```{r}
+ctrl <- trainControl(method = "cv", number = 10, selectionFunction = "best")
+```
+
+Include the `lymph_nodes_log` variable we created 
+```{r}
+full_formula <- log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grade + lymph_nodes_log + ER + PR + HER2 + Ki67 + stage + surgery + chemo + hormonal_therapy
+```
+
+# (1) Linear Regression (Baseline)
+```{r}
+set.seed(1)
+fit_lm <- train(full_formula, data = train_data, method = "lm", trControl = ctrl)
+```
+
+# (2) Ridge, Lasso, Elastic Net (Regularization)
+## (2-1) Ridge
+```{r}
+set.seed(1)
+fit_ridge <- train(full_formula, data = train_data, method = "glmnet",
+                  tuneGrid = expand.grid(alpha = 0,
+                                         lambda = exp(seq(-5, 5, length = 50))),
+                  trControl = ctrl)
+
+plot(fit_ridge, xTrans = log)
+
+fit_ridge$bestTune
+```
+
+
+## (2-2) Lasso
+```{r}
+set.seed(1)
+fit_lasso <- train(full_formula, data = train_data, method = "glmnet",
+                  tuneGrid = expand.grid(alpha = 1,
+                                         lambda = exp(seq(-8, 0, length = 50))),
+                  trControl = ctrl)
+
+plot(fit_lasso, xTrans = log)
+
+fit_lasso$bestTune
+
+coef(fit_lasso$finalModel, fit_lasso$bestTune$lambda)
+```
+
+## (2-3) Elastic net
+```{r}
+set.seed(1)
+fit_enet <- train(full_formula, data = train_data, method = "glmnet",
+                  tuneGrid = expand.grid(alpha = seq(0, 1, length = 11),
+                                         lambda = exp(seq(-5, 1, length = 50))),
+                  trControl = ctrl)
+
+fit_enet$bestTune
+
+plot(fit_enet, xTrans = log)
+
+coef(fit_enet$finalModel, fit_enet$bestTune$lambda)
+```
+
+# (3) PCR & PLS (Dimension Reduction)
+## (3-1) PCR (Principal Component Regression)
+```{r}
+set.seed(1)
+fit_pcr <- train(full_formula, data = train_data, method = "pcr", 
+                 scale = TRUE, trControl = ctrl, tuneLength = 15)
+```
+
+
+## (3-2) PLS (Partial Least Squares)
+```{r}
+set.seed(1)
+fit_pls <- train(full_formula, data = train_data, method = "pls", 
+                 scale = TRUE, trControl = ctrl, tuneLength = 15)
+```
+
+# (4) GAM & MARS (Nonlinear Methods)
+## (4-1) GAM
+```{r}
+set.seed(1)
+fit_gam <- train(full_formula, data = train_data, method = "gam", trControl = ctrl)
+```
+
+## (4-2) MARS
+```{r}
+set.seed(1)
+fit_mars <- train(full_formula, data = train_data, method = "earth", trControl = ctrl)
+```
+
+# Model comparison
+```{r}
+res_comparison <- resamples(list(LM = fit_lm, Ridge = fit_ridge, Lasso = fit_lasso, ENet = fit_enet, PLS = fit_pls, PCR = fit_pcr, GAM = fit_gam, MARS = fit_mars))
+summary(res_comparison)
+
+bwplot(res_comparison, metric = "RMSE", main = "CV RMSE Comparison")
+```
+
+
