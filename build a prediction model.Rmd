@@ -170,3 +170,15 @@ test_results <- test_preds |>
 print(test_results)
 ```
 
+```{r}
+# Variable Importance for GAM model
+gam_imp <- varImp(fit_gam)
+
+plot(gam_imp, top = 10, main = "Variable Importance: Final GAM Model")
+```
+
+
+```{r}
+vip(fit_mars$finalModel, type = "nsubsets")
+```
+
