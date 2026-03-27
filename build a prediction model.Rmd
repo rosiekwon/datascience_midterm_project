@@ -40,7 +40,8 @@ ctrl <- trainControl(method = "cv", number = 10, selectionFunction = "best")
 
 Include the `lymph_nodes_log` variable we created 
 ```{r}
-full_formula <- log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grade + lymph_nodes_log + ER + PR + HER2 + Ki67 + stage + surgery + chemo + hormonal_therapy
+full_formula <- log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grade +
+  lymph_nodes_log + ER + PR + HER2 + Ki67 + stage + surgery + chemo + hormonal_therapy
 ```
 
 # 1. Linear Regression (Baseline)
@@ -66,7 +67,7 @@ fit_ridge$bestTune
 
 
 ## 2-2. Lasso Regression
-```{r}
+```{r warning = FALSE}
 set.seed(1)
 fit_lasso <- train(full_formula, data = train_data, method = "glmnet",
                   tuneGrid = expand.grid(alpha = 1,
@@ -81,7 +82,7 @@ coef(fit_lasso$finalModel, fit_lasso$bestTune$lambda)
 ```
 
 ## 2-3. Elastic net Regression
-```{r}
+```{r warning = FALSE}
 set.seed(1)
 fit_enet <- train(full_formula, data = train_data, method = "glmnet",
                   tuneGrid = expand.grid(alpha = seq(0, 1, length = 11),
@@ -139,7 +140,9 @@ plot(fit_mars)
 
 # Model comparison CV RMSE
 ```{r}
-res_comparison <- resamples(list(LM = fit_lm, Ridge = fit_ridge, Lasso = fit_lasso, ENet = fit_enet, PLS = fit_pls, PCR = fit_pcr, GAM = fit_gam, MARS = fit_mars))
+res_comparison <- resamples(list(LM = fit_lm, Ridge = fit_ridge, Lasso = fit_lasso, 
+                                 ENet = fit_enet, PLS = fit_pls, PCR = fit_pcr, 
+                                 GAM = fit_gam, MARS = fit_mars))
 summary(res_comparison)
 
 bwplot(res_comparison, metric = "RMSE", main = "CV RMSE Comparison")
