@@ -391,7 +391,6 @@ model_list <- list(LM = fit_lm, Ridge = fit_ridge, Lasso = fit_lasso,
                    ENet = fit_enet, PLS = fit_pls, PCR = fit_pcr, 
                    GAM = fit_gam, MARS = fit_mars)
 
-
 test_preds <- as.data.frame(lapply(model_list, predict, newdata = test_data))
 
 
@@ -399,6 +398,7 @@ test_preds$log_PFS <- test_data$log_PFS
 
 # arrange the test rmse results into a table from ascending order
 test_results <- test_preds |> 
+  rename(MARS = y) |> 
   pivot_longer(cols = -log_PFS, names_to = "Model", values_to = "Predicted")  |> 
   group_by(Model)  |> 
   summarize(
@@ -671,12 +671,22 @@ coef(fit_marsB$finalModel)
 
 Comparing the models based on resampling results.
 ```{r}
+# List of the models
 res_comparison <- resamples(list(LM = fit_lmB, Ridge = fit_ridgeB, Lasso = fit_lassoB, ENet = fit_enetB, PLS = fit_plsB, PCR = fit_pcrB, GAM = fit_gamB, MARS = fit_marsB))
 summary(res_comparison)
 
 bwplot(res_comparison, metric = "RMSE", main = "CV RMSE Comparison")
 ```
 
+In order to check what is the reason behind the discrepancy, we created a variable importance plot using the GAM model that was trained with the 2000-2005 cohort.
+
+```{r}
+#Variable Importance
+vip_B <- varImp(fit_gamB)
+plot(vip_B, top = 10, main = "Variable Importance: 2000-2005 Cohort (Researcher B)")
+```
+
+In the 1990-1995 cohort, lymph_nodes_log was the predominant predictor, whereas in the 2000-2005 cohort, its importance markedly decreased, giving way to treatment-related factors like hormonal_therapy and biological markers like Ki67 and tumor_grade. 
 
 # 9. Test RMSE 
 ```{r}
@@ -685,13 +695,14 @@ model_list <- list(LM = fit_lmB, Ridge = fit_ridgeB, Lasso = fit_lassoB,
                    GAM = fit_gamB, MARS = fit_marsB)
 
 
-test_preds <- as.data.frame(lapply(model_list, predict, newdata = test_data))
+test_preds <- as.data.frame(lapply(model_list, predict, newdata = test_dataB))
 
 
-test_preds$log_PFS <- test_data$log_PFS
+test_preds$log_PFS <- test_dataB$log_PFS
 
 
 test_results <- test_preds |> 
+  rename(MARS = y) |> 
   pivot_longer(cols = -log_PFS, names_to = "Model", values_to = "Predicted")  |> 
   group_by(Model)  |> 
   summarize(
@@ -701,13 +712,3 @@ test_results <- test_preds |>
 
 print(test_results)
 ```
-
-In order to check what is the reason behind the discrepancy, we created a variable importance plot using GAM model that was trained with 2000-2005 cohort.
-
-```{r}
-#Variable Importance
-vip_B <- varImp(fit_gamB)
-plot(vip_B, top = 10, main = "Variable Importance: 2000-2005 Cohort (Researcher B)")
-```
-
-In the 1990-1995 cohort, lymph_nodes_log was the predominant predictor, whereas in the 2000-2005 cohort, its importance markedly decreased, giving way to treatment-related factors like hormonal_therapy and biological markers like Ki67 and tumor_grade. 
