@@ -222,7 +222,6 @@ dfA |>
 ## Train Test Split
 ```{r}
 set.seed(1)
-
 train_index <- createDataPartition(dfA$log_PFS, p = 0.7, list = FALSE)
 train_data <- dfA[train_index, ]
 test_data  <- dfA[-train_index, ]
@@ -243,8 +242,7 @@ All model development and tuning were performed exclusively within the training 
 ctrl <- trainControl(method = "cv", number = 10, selectionFunction = "best")
 ```
 
-We first created a variable to include all predictors as well as the "lymph_nodes_log"
-we created.
+We first created a variable to include all predictors as well as the "lymph_nodes_log" we created.
 ```{r}
 #full list of predictors
 full_formula <- log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grade +
@@ -420,8 +418,6 @@ gam_imp <- varImp(fit_gam)
 plot(gam_imp, top = 10, main = "Variable Importance: Final GAM Model")
 ```
 
-
-
 In conclusion, among all candidate models, the GAM showed the best predictive performance based on the lowest cross-validated RMSE. The test RMSE was reported as a supplementary measure on the independent test set, and it was consistent with the cross-validation results, with the GAM model also achieving the lowest value. Overall, for researcher A’s data,
 log_PFS~menopause+race+tumor_grade+ER+PR+HER2
 +stage+surgery+chemo+hormonal_therapy+
@@ -517,10 +513,9 @@ dfB |>
 
 ```{r}
 pred_B <- predict(fit_gam, newdata = dfB)
-```
 
-```{r}
-rmse_B <- sqrt(mean((datB$log_PFS - pred_B)^2))
+#RMSE value 
+rmse_B <- sqrt(mean((dfB$log_PFS - pred_B)^2))
 print(rmse_B)
 ```
 
@@ -531,6 +526,7 @@ The GAM model that we built to predict for PFS does not generalize well to the 2
 
 To build a robust model for the 2000s, we also employed a 70/30 split and a consistent seed (1) to ensure the new findings are comparable to the previous study's methodology.
 ```{r}
+#split dataset
 set.seed(1) 
 train_index <- createDataPartition(dfB$log_PFS, p = 0.7, list = FALSE)
 train_dataB <- dfB[train_index, ]
@@ -543,7 +539,7 @@ test_dataB  <- dfB[-train_index, ]
 set.seed(1)
 fit_lmB <- train(full_formula, data = train_dataB, method = "lm", trControl = ctrl)
 
-fit_lmB$finalmodel
+summary(fit_lmB)
 ```
 
 ## 7-2. Ridge, Lasso, Elastic Net (Regularization)
@@ -596,22 +592,41 @@ coef(fit_enetB$finalModel, fit_enetB$bestTune$lambda)
 ### 7-3-1. PCR (Principal Component Regression)
 ```{r}
 set.seed(1)
-pcr_modB <- pcr(full_formula, data = train_dataB, scale = TRUE, validation = "CV")
+#fit the pcr model using the function train() in caret
+fit_pcrB <- train(full_formula, data = train_dataB, method = "pcr", 
+                 scale = TRUE, trControl = ctrl,
+                 tuneGrid = data.frame(ncomp = 1:19))
 
-summary(pcr_modB)
+summary(fit_pcrB)
 
 
-fit_pcrB <- train(full_formula, data = train_data, method = "pcr", 
-                 scale = TRUE, trControl = ctrl, tuneLength = 15)
+
+
+#determine the optimal number of components using plot 
+ggplot(fit_pcrB, highlight = TRUE) + theme_bw()
 ```
 
 
 ### 7-3-2. PLS (Partial Least Squares)
 ```{r}
 set.seed(1)
+#fit the pls model using plsr()
+pls_mod <- plsr(full_formula, data = train_dataB, scale = TRUE, validation = "CV")
+
+summary(pls_mod)
+
+#With the consistent using caret function to fit the model, we fit the model using train() function in caret
 fit_plsB <- train(full_formula, data = train_dataB, method = "pls", 
-                 scale = TRUE, trControl = ctrl, tuneLength = 15)
+                 scale = TRUE, trControl = ctrl, 
+                 tuneGrid = data.frame(ncomp = 1:19))
+summary(fit_plsB)
+
+
+#determine the optimal number of components using plot 
+ggplot(fit_plsB, highlight = TRUE) + theme_bw()
 ```
+
+The optimal number of components is 2 
 
 ## 7-4. GAM & MARS (Nonlinear Methods)
 
@@ -619,22 +634,42 @@ fit_plsB <- train(full_formula, data = train_dataB, method = "pls",
 
 ```{r}
 set.seed(1)
+#fit the gam model using caret
 fit_gamB <- train(full_formula, data = train_dataB, method = "gam", trControl = ctrl)
 
 summary(fit_gamB)
 
 fit_gam$finalModel
+
+#While caret provides an efficient pipeline for model comparison, it limits the flexibility of the mgcv engine. We conducted a manual GAM analysis for Researcher B using the s() function for continuous variables
+gam.B1 <- gam(log_PFS ~ s(age) + menopause + race + s(bmi) + s(tumor_size) + tumor_grade + s(lymph_nodes_log) + ER + PR + HER2 + s(Ki67) + stage + surgery + chemo + hormonal_therapy, data = train_dataB)
+
+summary(gam.B1)
+
+plot(gam.B1)
 ```
 
+s(Ki67) has an edf value of 1.000, showing that Ki67 has a perfectly linear relationship with log_PFS.
+
 ### 7-4-2. MARS
+
+For the MARS model, we defined a tuning grid with degree ranging from 1 to 3 and nprune from 2 to 19. The range for nprune was chosen to encompass the full set of predictors.
 ```{r}
 set.seed(1)
-fit_marsB <- train(full_formula, data = train_dataB, method = "earth", trControl = ctrl)
+mars_grid <- expand.grid(degree = 1:3, nprune = 2:19)
 
-plot(fit_marsB)
+fit_marsB <- train(full_formula, data = train_dataB, method = "earth", tuneGrid = mars_grid, trControl = ctrl)
+
+ggplot(fit_marsB)
+
+fit_marsB$bestTune
+
+coef(fit_marsB$finalModel)
 ```
 
 # 8. Model comparison CV RMSE
+
+Comparing the models based on resampling results.
 ```{r}
 res_comparison <- resamples(list(LM = fit_lmB, Ridge = fit_ridgeB, Lasso = fit_lassoB, ENet = fit_enetB, PLS = fit_plsB, PCR = fit_pcrB, GAM = fit_gamB, MARS = fit_marsB))
 summary(res_comparison)
@@ -675,4 +710,4 @@ vip_B <- varImp(fit_gamB)
 plot(vip_B, top = 10, main = "Variable Importance: 2000-2005 Cohort (Researcher B)")
 ```
 
-In the 1990-1995 cohort, lymph_nodes_log was the predominant predictor, whereas in the 2000-2005 cohort, its importance markedly decreased, giving way to treatment-related factors like hormonal_therapy and biological markers like Ki67 and tumor_grade.
+In the 1990-1995 cohort, lymph_nodes_log was the predominant predictor, whereas in the 2000-2005 cohort, its importance markedly decreased, giving way to treatment-related factors like hormonal_therapy and biological markers like Ki67 and tumor_grade. 
