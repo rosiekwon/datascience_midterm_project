@@ -1,0 +1,678 @@
+---
+title: "Group 22 Midterm Project"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+\newpage
+
+# 1. Data preprocessing
+
+## Load packages and data
+
+```{r setup, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(GGally)
+library(corrplot)
+library(caret)
+library(glmnet)
+library(mgcv)
+library(earth)
+library(pls)
+library(patchwork)
+library(vip) 
+```
+
+```{r}
+load("datA.RData")
+dfA <- datA
+```
+
+## Basic Structure
+```{r}
+# Dimensions
+dim(dfA)
+
+# Summary
+summary(dfA)
+```
+
+## Convert variables to factors
+```{r}
+dfA <- dfA |>
+  mutate(
+    # Nominal variables
+    menopause = factor(menopause, levels = c(0,1), labels = c("Pre","Post")),
+    race = factor(race, levels = c(1,2,3,4),
+                  labels = c("White","Black","Asian","Hispanic")),
+    surgery = factor(surgery, levels = c(0,1),
+                     labels = c("BCS","Mastectomy")),
+    chemo = factor(chemo, levels = c(0,1),
+                   labels = c("No","Yes")),
+    hormonal_therapy = factor(hormonal_therapy, levels = c(0,1),
+                             labels = c("No","Yes")),
+    ER = factor(ER, levels = c(0,1), labels = c("Negative","Positive")),
+    PR = factor(PR, levels = c(0,1), labels = c("Negative","Positive")),
+    HER2 = factor(HER2, levels = c(0,1), labels = c("Negative","Positive")),
+
+    # Ordinal variables
+    tumor_grade = factor(tumor_grade, levels = c(1,2,3),
+                         labels = c("Well","Moderate","Poor"),
+                         ordered = TRUE),
+
+    stage = factor(stage, levels = c(1,2,3),
+                   labels = c("Stage I","Stage II","Stage III"),
+                   ordered = TRUE)
+  )
+```
+
+## Missing data check
+```{r}
+# Count 
+colSums(is.na(dfA))
+```
+
+# 2. EDA for Dataset A
+
+## Distribution of continuous variables
+```{r}
+# Histograms
+dfA |> 
+  select(age, bmi, tumor_size, lymph_nodes, Ki67, log_PFS) |>
+  pivot_longer(cols = everything()) |>
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  facet_wrap(~name, scales = "free") +
+  theme_minimal()
+```
+
+## Frequency distribution of categorical variables
+```{r}
+plot_categorical <- function(data, vars, title_text) {
+  plot_data <- data |>
+    select(all_of(vars)) |>
+    mutate(across(everything(), as.character)) |>
+    pivot_longer(cols = everything()) |>
+    group_by(name, value) |>
+    summarise(count = n(), .groups = "drop") |>
+    group_by(name) |>
+    mutate(
+      percent = count / sum(count),
+      label = paste0(count, "\n(", round(percent * 100, 1), "%)")
+    )
+
+  ggplot(plot_data, aes(x = value, y = count)) +
+    geom_bar(stat = "identity", fill = "steelblue", alpha = 0.8) +
+    geom_text(
+      aes(label = label),
+      vjust = -0.3,       
+      color = "black",    
+      size = 3,
+      lineheight = 0.9  
+    ) +
+    facet_wrap(~name, scales = "free", ncol = 3) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.25))) + 
+    coord_cartesian(clip = "off") + 
+    theme_minimal() +
+    labs(x = "Category", y = "Count", title = title_text) +
+    theme(
+      strip.text = element_text(face = "bold", size = 11, margin = margin(b = 10)),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.major.x = element_blank(),
+      plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+      legend.position = "none"
+    )
+}
+
+vars1 <- c("stage", "tumor_grade", "ER", "PR", "HER2")
+vars2 <- c("race", "menopause", "chemo", "hormonal_therapy", "surgery")
+
+plot_categorical(dfA, vars1, "Distribution of Categorical Variables")
+plot_categorical(dfA, vars2, "Distribution of Categorical Variables Cont.")
+```
+
+
+## Relationship with response variable
+```{r}
+# Categorical
+dfA |>
+  select(log_PFS, stage, tumor_grade, ER, PR, HER2,
+         chemo, hormonal_therapy, surgery, menopause) |>
+  mutate(across(-log_PFS, as.character)) |>
+  pivot_longer(cols = -log_PFS) |>
+  ggplot(aes(x = value, y = log_PFS)) +
+  
+  geom_boxplot(fill = "lightblue") +
+  
+  facet_wrap(~name, scales = "free_x", ncol = 5) +
+  
+  theme_minimal() +
+  labs(
+    x = "Category",
+    y = "log_PFS",
+    title = "Association Between Categorical Variables and log_PFS"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    strip.text = element_text(size = 10)
+  )
+
+# Continuous
+dfA |>
+  select(log_PFS, age, bmi, tumor_size, lymph_nodes, Ki67) |>
+  pivot_longer(cols = -log_PFS) |>
+  ggplot(aes(x = value, y = log_PFS)) +
+  geom_point(alpha = 0.3, color = "lightblue") +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  facet_wrap(~name, scales = "free_x") +
+  theme_minimal() +
+  labs(
+    x = "Value",
+    y = "log_PFS",
+    title = "Association Between Continuous Variables and log_PFS"
+  )
+```
+
+## Correlation Check (Continuous)
+```{r}
+library(corrplot)
+cont_vars <- dfA |>
+  select(age, bmi, tumor_size, lymph_nodes, Ki67, log_PFS)
+
+cor_matrix <- cor(cont_vars, use = "complete.obs")
+
+corrplot::corrplot(
+  cor_matrix,
+  method = "circle",         
+  type = "full",
+  tl.col = "red",            
+  tl.srt = 45,               
+  addCoef.col = "black",     
+  number.cex = 0.7,
+  mar = c(0,0,1,0)
+)
+```
+
+## Handle Skewness
+```{r}
+# Log transform lymph_nodes
+dfA <- dfA |>
+  mutate(
+    lymph_nodes_log = log(lymph_nodes + 1)
+  )
+dfA |>
+  select(lymph_nodes, lymph_nodes_log) |>
+  pivot_longer(cols = everything()) |>
+  ggplot(aes(x = value)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 binwidth = 0.2,
+                 fill = "steelblue",
+                 color = "black") +
+  geom_density(color = "red", linewidth = 1) +
+  facet_wrap(~name, scales = "free") +
+  theme_minimal() +
+  labs(title = "Before vs After Log Transformation")
+```
+
+## Train Test Split
+```{r}
+set.seed(1)
+
+train_index <- createDataPartition(dfA$log_PFS, p = 0.7, list = FALSE)
+train_data <- dfA[train_index, ]
+test_data  <- dfA[-train_index, ]
+```
+
+
+We loaded the cleaned dataset from clean_datA.RData, which had already been split into a training set (train_data, n = 1400) and a testing set (test_data, n = 600). To ensure reproducibility and match with previous data cleaning process, we set the random seed to 1 before model fitting.
+
+```{r}
+set.seed(1) 
+train <- train_data
+test <- test_data
+```
+
+All model development and tuning were performed exclusively within the training set using 10-fold cross-validation.
+```{r}
+#cross validation setting
+ctrl <- trainControl(method = "cv", number = 10, selectionFunction = "best")
+```
+
+We first created a variable to include all predictors as well as the "lymph_nodes_log"
+we created.
+```{r}
+#full list of predictors
+full_formula <- log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grade +
+  lymph_nodes_log + ER + PR + HER2 + Ki67 + stage + surgery + chemo + hormonal_therapy
+```
+
+# 3. Model Building 
+## 3-1. Linear Regression (Baseline)
+The baseline linear regression model was fit using the full set of predictors. In the baseline model, older age, larger tumor size, greater lymph node burden, HER2 positivity, and lack of hormonal therapy were associated with shorter log-transformed PFS, whereas ER positivity was associated with longer log-transformed PFS.
+```{r}
+set.seed(1)
+fit_lm <- train(full_formula, data = train, method = "lm", trControl = ctrl)
+fit_lm$finalModel
+```
+
+## 3-2. Ridge, Lasso, Elastic Net (Regularization)
+
+### 3-2-1. Ridge Regression
+The ridge regression was fit using the full set of predictors with alpha = 0 based on definition. The ridge regression model will choose the best lambda value by itself.
+```{r}
+set.seed(1)
+fit_ridge <- train(full_formula, data = train, method = "glmnet",
+                  tuneGrid = expand.grid(alpha = 0,
+                                         lambda = exp(seq(-5, 5, length = 50))),
+                  trControl = ctrl)
+
+plot(fit_ridge, xTrans = log)
+
+fit_ridge$bestTune
+```
+From the ridge regression plot, we can see that the performance of CV RMSE was pretty well with about 0.71 as the lowest.
+
+
+### 3-2-2. Lasso Regression
+The lasso regression was fit using the full set of predictors with alpha = 1 based on definition. The lasso regression model will choose the best lamda value by itself.
+```{r warning = FALSE}
+set.seed(1)
+fit_lasso <- train(full_formula, data = train, method = "glmnet",
+                  tuneGrid = expand.grid(alpha = 1,
+                                         lambda = exp(seq(-8, 0, length = 50))),
+                  trControl = ctrl)
+
+plot(fit_lasso, xTrans = log)
+
+fit_lasso$bestTune
+
+coef(fit_lasso$finalModel, fit_lasso$bestTune$lambda)
+```
+Moreover, from the result curve of lasso regression model, we can observe that there is a obvious downwards trend when the tuning parameter approaches to -4. The cv rmse is slightly smaller than 0.71 at parameter = -4.
+
+### 3-2-3. Elastic net Regression
+
+The elastic net regression was fit using the full set of predictors without choosen alpha. The elastic net regression model will choose the best lamda value and alpha value by itself.
+```{r warning = FALSE}
+set.seed(1)
+fit_enet <- train(full_formula, data = train, method = "glmnet",
+                  tuneGrid = expand.grid(alpha = seq(0, 1, length = 11),
+                                         lambda = exp(seq(-5, 1, length = 50))),
+                  trControl = ctrl)
+
+fit_enet$bestTune
+
+plot(fit_enet, xTrans = log)
+
+coef(fit_enet$finalModel, fit_enet$bestTune$lambda)
+```
+The output and the plot shows that when alpha = 0.3 and lambda = 0.05402181, the lowest cv rmse value is about 0.71
+
+
+## 3-3. PCR & PLS (Dimension Reduction)
+### 3-3-1. PCR (Principal Component Regression)
+The PCR model was fit using the full set of predictors with standardized variables. It reduced the original predictors to a smaller number of principal components and selected the number of components by cross-validation.
+```{r}
+set.seed(1)
+pcr_mod <- pcr(full_formula, data = train, scale = TRUE, validation = "CV")
+
+summary(pcr_mod)
+
+
+fit_pcr <- train(full_formula, data = train_data, method = "pcr", 
+                 scale = TRUE, trControl = ctrl, tuneLength = 15)
+ggplot(fit_pcr, highlight = TRUE)
+
+```
+
+The PCR tuning plot suggests that predictive performance improved as the number of components increased up to about 8, where the CV RMSE reached its minimum, about 0.71. Beyond that point, adding more components did not improve prediction.
+
+### 3-3-2. PLS (Partial Least Squares)
+The PLS model was also fit using the full set of standardized predictors, with the number of components selected by cross-validation. PLS constructs components using information from both the predictors and the response.
+```{r warning=FALSE}
+set.seed(1)
+fit_pls <- train(full_formula, data = train, method = "pls", 
+                 scale = TRUE, trControl = ctrl, tuneLength = 15)
+ggplot(fit_pls, highlight = TRUE)
+```
+From the plot, we can observe that PLS reached its best performance with only 1 component. This suggests that PLS was more efficient in extracting components that were directly related to the outcome.
+
+
+## 3-4. GAM & MARS (Nonlinear Methods)
+
+### 3-4-1. GAM
+The GAM model was fit using the full set of predictors to allow for possible nonlinear effects.
+```{r}
+set.seed(1)
+fit_gam <- train(full_formula, data = train, method = "gam", trControl = ctrl)
+
+summary(fit_gam)
+
+fit_gam$finalModel
+
+plot(fit_gam)
+```
+From the plot, we can see that the cv rmse was slightly smaller for the GAM without feature selection, indicating that keeping all predictors produced better predictive performance than using feature selection.
+
+
+### 3-4-2. MARS
+The MARS model was fit as a flexible nonlinear regression model using the full set of predictors. It automatically searched for piecewise linear relationships and selected model complexity through cross-validation.
+```{r}
+set.seed(1)
+fit_mars <- train(full_formula, data = train, method = "earth", trControl = ctrl)
+
+plot(fit_mars)
+```
+From the result, it shows that although the minimum CV RMSE was achieved at the largest number of terms, the difference from the model with 12 terms was negligible. This suggests that increasing model complexity beyond 12 terms did not meaningfully improve prediction.
+
+# 4. Model comparison using CV-RMSE
+Based on the cross-validated RMSE results, the GAM achieved the smallest mean RMSE among all candidate models. This indicates that, during model development within the training set, the GAM had the strongest overall predictive performance. Since cross-validation provides an internal estimate of out-of-sample prediction error, this result suggests that the GAM was the most promising model among the candidate approaches we considered.
+```{r}
+# obtain all cv rmse results from the models
+res_comparison <- resamples(list(LM = fit_lm, Ridge = fit_ridge, Lasso = fit_lasso, 
+                                 ENet = fit_enet, PLS = fit_pls, PCR = fit_pcr, 
+                                 GAM = fit_gam, MARS = fit_mars))
+summary(res_comparison)
+
+#visualize the comparison between cv rmse results
+bwplot(res_comparison, metric = "RMSE", main = "CV RMSE Comparison")
+```
+
+
+# 5. Test RMSE 
+
+We additionally reported the test RMSE to describe how the selected model performed on the independent test set. Among the test RMSE results, the GAM also had the lowest value, indicating that it maintained the strongest predictive performance on unseen data. Although we are not using test RMSE for model selection, this result was consistent with the cross-validation findings and provided additional evidence that the GAM generalized well to the independent test set.
+
+```{r}
+model_list <- list(LM = fit_lm, Ridge = fit_ridge, Lasso = fit_lasso, 
+                   ENet = fit_enet, PLS = fit_pls, PCR = fit_pcr, 
+                   GAM = fit_gam, MARS = fit_mars)
+
+
+test_preds <- as.data.frame(lapply(model_list, predict, newdata = test_data))
+
+
+test_preds$log_PFS <- test_data$log_PFS
+
+# arrange the test rmse results into a table from ascending order
+test_results <- test_preds |> 
+  pivot_longer(cols = -log_PFS, names_to = "Model", values_to = "Predicted")  |> 
+  group_by(Model)  |> 
+  summarize(
+    Test_RMSE = sqrt(mean((log_PFS - Predicted)^2)),
+  )  |> 
+  arrange(Test_RMSE) 
+
+print(test_results)
+```
+
+## Variable Importance plot
+Although the GAM output showed that many predictors had effects that were approximately linear (edf = 1.00), the model also suggested that some important predictors exhibited nonlinear patterns. To further justify the use of a nonlinear model, we examined the variable importance results from the GAM. We found that the two most influential predictors were both variables with nonlinear effects. This helps explain why the GAM achieved the best predictive performance.
+```{r}
+# Variable Importance for GAM model
+gam_imp <- varImp(fit_gam)
+
+plot(gam_imp, top = 10, main = "Variable Importance: Final GAM Model")
+```
+
+
+
+In conclusion, among all candidate models, the GAM showed the best predictive performance based on the lowest cross-validated RMSE. The test RMSE was reported as a supplementary measure on the independent test set, and it was consistent with the cross-validation results, with the GAM model also achieving the lowest value. Overall, for researcher A’s data,
+log_PFS~menopause+race+tumor_grade+ER+PR+HER2
++stage+surgery+chemo+hormonal_therapy+
+s(lymph_nodes_log)+s(tumor_size)+s(bmi)+s(Ki67)+s(age) 
+
+from the GAM model is the best predictive model for PFS.
+
+# 6. External validation - Researcher B
+
+```{r}
+#load 2000–2005 cohort data
+load("datB.RData")
+dfB <- datB
+```
+
+## Convert variables to factors
+```{r}
+dfB <- dfB |>
+  mutate(
+    # Nominal variables
+    menopause = factor(menopause, levels = c(0,1), labels = c("Pre","Post")),
+    race = factor(race, levels = c(1,2,3,4),
+                  labels = c("White","Black","Asian","Hispanic")),
+    surgery = factor(surgery, levels = c(0,1),
+                     labels = c("BCS","Mastectomy")),
+    chemo = factor(chemo, levels = c(0,1),
+                   labels = c("No","Yes")),
+    hormonal_therapy = factor(hormonal_therapy, levels = c(0,1),
+                             labels = c("No","Yes")),
+    ER = factor(ER, levels = c(0,1), labels = c("Negative","Positive")),
+    PR = factor(PR, levels = c(0,1), labels = c("Negative","Positive")),
+    HER2 = factor(HER2, levels = c(0,1), labels = c("Negative","Positive")),
+
+    # Ordinal variables
+    tumor_grade = factor(tumor_grade, levels = c(1,2,3),
+                         labels = c("Well","Moderate","Poor"),
+                         ordered = TRUE),
+
+    stage = factor(stage, levels = c(1,2,3),
+                   labels = c("Stage I","Stage II","Stage III"),
+                   ordered = TRUE)
+  )
+```
+
+
+```{r}
+summary(dfB)
+```
+
+## Distribution of continuous variables
+```{r}
+# Histograms
+dfB |> 
+  select(age, bmi, tumor_size, lymph_nodes, Ki67, log_PFS) |>
+  pivot_longer(cols = everything()) |>
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  facet_wrap(~name, scales = "free") +
+  theme_minimal()
+```
+
+## Frequency distribution of categorical variables
+```{r}
+vars1 <- c("stage", "tumor_grade", "ER", "PR", "HER2")
+vars2 <- c("race", "menopause", "chemo", "hormonal_therapy", "surgery")
+
+plot_categorical(dfB, vars1, "Distribution of Categorical Variables")
+plot_categorical(dfB, vars2, "Distribution of Categorical Variables Cont.")
+```
+
+## Handle Skewness
+```{r}
+# Log transform lymph_nodes
+dfB <- dfB |>
+  mutate(
+    lymph_nodes_log = log(lymph_nodes + 1)
+  )
+dfB |>
+  select(lymph_nodes, lymph_nodes_log) |>
+  pivot_longer(cols = everything()) |>
+  ggplot(aes(x = value)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 binwidth = 0.2,
+                 fill = "steelblue",
+                 color = "black") +
+  geom_density(color = "red", linewidth = 1) +
+  facet_wrap(~name, scales = "free") +
+  theme_minimal() +
+  labs(title = "Before vs After Log Transformation")
+```
+
+## Applying the GAM model to 2000-2005 cohort data
+
+```{r}
+pred_B <- predict(fit_gam, newdata = dfB)
+```
+
+```{r}
+rmse_B <- sqrt(mean((datB$log_PFS - pred_B)^2))
+print(rmse_B)
+```
+
+The GAM model that we built to predict for PFS does not generalize well to the 2000–2005 cohort. The RMSE with 2000-2005 cohort data increased to 0.8401 compared to the original 0.686. This discrepancy suggests a temporal shift in patient outcomes. 
+
+
+# 7. Building New Model for 2000-2005 cohort data
+
+To build a robust model for the 2000s, we also employed a 70/30 split and a consistent seed (1) to ensure the new findings are comparable to the previous study's methodology.
+```{r}
+set.seed(1) 
+train_index <- createDataPartition(dfB$log_PFS, p = 0.7, list = FALSE)
+train_dataB <- dfB[train_index, ]
+test_dataB  <- dfB[-train_index, ]
+```
+
+
+## 7-1. Linear Regression (Baseline)
+```{r}
+set.seed(1)
+fit_lmB <- train(full_formula, data = train_dataB, method = "lm", trControl = ctrl)
+
+fit_lmB$finalmodel
+```
+
+## 7-2. Ridge, Lasso, Elastic Net (Regularization)
+
+### 7-2-1. Ridge Regression
+```{r}
+set.seed(1)
+fit_ridgeB <- train(full_formula, data = train_dataB, method = "glmnet",
+                  tuneGrid = expand.grid(alpha = 0,
+                                         lambda = exp(seq(-5, 5, length = 50))),
+                  trControl = ctrl)
+
+plot(fit_ridgeB, xTrans = log)
+
+fit_ridgeB$bestTune
+```
+
+
+### 7-2-2. Lasso Regression
+```{r}
+set.seed(1)
+fit_lassoB <- train(full_formula, data = train_dataB, method = "glmnet",
+                  tuneGrid = expand.grid(alpha = 1,
+                                         lambda = exp(seq(-8, 0, length = 50))),
+                  trControl = ctrl)
+
+plot(fit_lassoB, xTrans = log)
+
+fit_lassoB$bestTune
+
+coef(fit_lassoB$finalModel, fit_lassoB$bestTune$lambda)
+```
+
+### 7-2-3. Elastic net Regression
+```{r}
+set.seed(1)
+fit_enetB <- train(full_formula, data = train_dataB, method = "glmnet",
+                  tuneGrid = expand.grid(alpha = seq(0, 1, length = 11),
+                                         lambda = exp(seq(-5, 1, length = 50))),
+                  trControl = ctrl)
+
+fit_enetB$bestTune
+
+plot(fit_enetB, xTrans = log)
+
+coef(fit_enetB$finalModel, fit_enetB$bestTune$lambda)
+```
+
+## 7-3. PCR & PLS (Dimension Reduction)
+### 7-3-1. PCR (Principal Component Regression)
+```{r}
+set.seed(1)
+pcr_modB <- pcr(full_formula, data = train_dataB, scale = TRUE, validation = "CV")
+
+summary(pcr_modB)
+
+
+fit_pcrB <- train(full_formula, data = train_data, method = "pcr", 
+                 scale = TRUE, trControl = ctrl, tuneLength = 15)
+```
+
+
+### 7-3-2. PLS (Partial Least Squares)
+```{r}
+set.seed(1)
+fit_plsB <- train(full_formula, data = train_dataB, method = "pls", 
+                 scale = TRUE, trControl = ctrl, tuneLength = 15)
+```
+
+## 7-4. GAM & MARS (Nonlinear Methods)
+
+### 7-4-1. GAM
+
+```{r}
+set.seed(1)
+fit_gamB <- train(full_formula, data = train_dataB, method = "gam", trControl = ctrl)
+
+summary(fit_gamB)
+
+fit_gam$finalModel
+```
+
+### 7-4-2. MARS
+```{r}
+set.seed(1)
+fit_marsB <- train(full_formula, data = train_dataB, method = "earth", trControl = ctrl)
+
+plot(fit_marsB)
+```
+
+# 8. Model comparison CV RMSE
+```{r}
+res_comparison <- resamples(list(LM = fit_lmB, Ridge = fit_ridgeB, Lasso = fit_lassoB, ENet = fit_enetB, PLS = fit_plsB, PCR = fit_pcrB, GAM = fit_gamB, MARS = fit_marsB))
+summary(res_comparison)
+
+bwplot(res_comparison, metric = "RMSE", main = "CV RMSE Comparison")
+```
+
+
+# 9. Test RMSE 
+```{r}
+model_list <- list(LM = fit_lmB, Ridge = fit_ridgeB, Lasso = fit_lassoB, 
+                   ENet = fit_enetB, PLS = fit_plsB, PCR = fit_pcrB, 
+                   GAM = fit_gamB, MARS = fit_marsB)
+
+
+test_preds <- as.data.frame(lapply(model_list, predict, newdata = test_data))
+
+
+test_preds$log_PFS <- test_data$log_PFS
+
+
+test_results <- test_preds |> 
+  pivot_longer(cols = -log_PFS, names_to = "Model", values_to = "Predicted")  |> 
+  group_by(Model)  |> 
+  summarize(
+    Test_RMSE = sqrt(mean((log_PFS - Predicted)^2)),
+  )  |> 
+  arrange(Test_RMSE) 
+
+print(test_results)
+```
+
+In order to check what is the reason behind the discrepancy, we created a variable importance plot using GAM model that was trained with 2000-2005 cohort.
+
+```{r}
+#Variable Importance
+vip_B <- varImp(fit_gamB)
+plot(vip_B, top = 10, main = "Variable Importance: 2000-2005 Cohort (Researcher B)")
+```
+
+In the 1990-1995 cohort, lymph_nodes_log was the predominant predictor, whereas in the 2000-2005 cohort, its importance markedly decreased, giving way to treatment-related factors like hormonal_therapy and biological markers like Ki67 and tumor_grade.
