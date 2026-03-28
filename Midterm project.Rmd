@@ -406,7 +406,7 @@ test_results <- test_preds |>
   )  |> 
   arrange(Test_RMSE) 
 
-print(test_results)
+knitr::kable(test_results)
 ```
 
 ## Variable Importance plot
@@ -710,5 +710,5 @@ test_results <- test_preds |>
   )  |> 
   arrange(Test_RMSE) 
 
-print(test_results)
+knitr::kable(test_results)
 ```
