@@ -465,6 +465,7 @@ dfB <- dfB |>
 
 ```{r}
 summary(dfB)
+colSums(is.na(dfB))
 ```
 
 ## Distribution of continuous variables
