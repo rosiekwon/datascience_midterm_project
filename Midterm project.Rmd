@@ -44,6 +44,7 @@ summary(dfA)
 
 ## Convert variables to factors
 ```{r}
+# Convert nominal and ordinal variables to factors
 dfA <- dfA |>
   mutate(
     # Nominal variables
@@ -200,7 +201,7 @@ corrplot::corrplot(
 
 ## Handle Skewness
 ```{r}
-# Log transform lymph_nodes
+# Log transform lymph_nodes to handle right-skewness
 dfA <- dfA |>
   mutate(
     lymph_nodes_log = log(lymph_nodes + 1)
@@ -238,13 +239,13 @@ test <- test_data
 
 All model development and tuning were performed exclusively within the training set using 10-fold cross-validation.
 ```{r}
-#cross validation setting
+#cross validation setting 
 ctrl <- trainControl(method = "cv", number = 10, selectionFunction = "best")
 ```
 
 We first created a variable to include all predictors as well as the "lymph_nodes_log" we created.
 ```{r}
-#full list of predictors
+#full list of predictors using the transformed 'lymph_nodes_log' instead of the original 'lymph_nodes'
 full_formula <- log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grade +
   lymph_nodes_log + ER + PR + HER2 + Ki67 + stage + surgery + chemo + hormonal_therapy
 ```
@@ -253,7 +254,7 @@ full_formula <- log_PFS ~ age + menopause + race + bmi + tumor_size + tumor_grad
 ## 3-1. Linear Regression (Baseline)
 The baseline linear regression model was fit using the full set of predictors. In the baseline model, older age, larger tumor size, greater lymph node burden, HER2 positivity, and lack of hormonal therapy were associated with shorter log-transformed PFS, whereas ER positivity was associated with longer log-transformed PFS.
 ```{r}
-set.seed(1)
+set.seed(1) # Ensure reproducible CV folds
 fit_lm <- train(full_formula, data = train, method = "lm", trControl = ctrl)
 fit_lm$finalModel
 ```
@@ -269,8 +270,10 @@ fit_ridge <- train(full_formula, data = train, method = "glmnet",
                                          lambda = exp(seq(-5, 5, length = 50))),
                   trControl = ctrl)
 
+#plot the ridge regression curve
 plot(fit_ridge, xTrans = log)
 
+#see the chosen lambda for ridge regression model
 fit_ridge$bestTune
 ```
 From the ridge regression plot, we can see that the performance of CV RMSE was pretty well with about 0.71 as the lowest.
@@ -285,10 +288,13 @@ fit_lasso <- train(full_formula, data = train, method = "glmnet",
                                          lambda = exp(seq(-8, 0, length = 50))),
                   trControl = ctrl)
 
+#plot the lasso curve
 plot(fit_lasso, xTrans = log)
 
+#see the chosen lambda for lasso model
 fit_lasso$bestTune
 
+#observe which coefficients are zero
 coef(fit_lasso$finalModel, fit_lasso$bestTune$lambda)
 ```
 Moreover, from the result curve of lasso regression model, we can observe that there is a obvious downwards trend when the tuning parameter approaches to -4. The cv rmse is slightly smaller than 0.71 at parameter = -4.
@@ -303,10 +309,13 @@ fit_enet <- train(full_formula, data = train, method = "glmnet",
                                          lambda = exp(seq(-5, 1, length = 50))),
                   trControl = ctrl)
 
+#see the chosen lambda for elastic net model
 fit_enet$bestTune
 
+#plot the elastic net curve
 plot(fit_enet, xTrans = log)
 
+#observe which coefficients are zero
 coef(fit_enet$finalModel, fit_enet$bestTune$lambda)
 ```
 The output and the plot shows that when alpha = 0.3 and lambda = 0.05402181, the lowest cv rmse value is about 0.71
@@ -321,7 +330,7 @@ pcr_mod <- pcr(full_formula, data = train, scale = TRUE, validation = "CV")
 
 summary(pcr_mod)
 
-
+# We chose 15 because the total number of predictors (including dummy variables) is around 19
 fit_pcr <- train(full_formula, data = train_data, method = "pcr", 
                  scale = TRUE, trControl = ctrl, tuneLength = 15)
 ggplot(fit_pcr, highlight = TRUE)
@@ -387,12 +396,12 @@ bwplot(res_comparison, metric = "RMSE", main = "CV RMSE Comparison")
 We additionally reported the test RMSE to describe how the selected model performed on the independent test set. Among the test RMSE results, the GAM also had the lowest value, indicating that it maintained the strongest predictive performance on unseen data. Although we are not using test RMSE for model selection, this result was consistent with the cross-validation findings and provided additional evidence that the GAM generalized well to the independent test set.
 
 ```{r}
+# get all test RMSE and put them into a data frame
 model_list <- list(LM = fit_lm, Ridge = fit_ridge, Lasso = fit_lasso, 
                    ENet = fit_enet, PLS = fit_pls, PCR = fit_pcr, 
                    GAM = fit_gam, MARS = fit_mars)
 
 test_preds <- as.data.frame(lapply(model_list, predict, newdata = test_data))
-
 
 test_preds$log_PFS <- test_data$log_PFS
 
